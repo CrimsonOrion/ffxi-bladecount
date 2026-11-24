@@ -28,6 +28,7 @@ Copy the `bladecount` folder into `Ashita/addons`, then:
 | `/bod refresh` | Read the current count from the server (resets your TP; the sword is re-equipped afterwards) |
 | `/bod fetch` | Bring the sword back from your Satchel, Sack or Case and equip it (use this if a refresh stops partway) |
 | `/bod status` | Print the counts in chat |
+| `/bod opacity <0-100>` | Set the window's background opacity (also a slider under Settings in the window; 0 is fully clear) |
 | `/bod reset` | Zero the live counter |
 
 The window appears only while you have a Chaosbringer in your inventory or wardrobes. Refresh needs a free slot in your Satchel, Sack or Case, plus a free inventory slot if the sword is in a wardrobe; a sword taken from a wardrobe ends up in your inventory.

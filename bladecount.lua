@@ -14,7 +14,7 @@
 
 addon.name    = 'bladecount';
 addon.author  = 'CrimsonOrion';
-addon.version = '1.8';
+addon.version = '1.10';
 addon.desc    = 'Tracks Chaosbringer kills for Blade of Darkness and Blade of Death.';
 addon.link    = 'https://github.com/CrimsonOrion/ffxi-bladecount';
 
@@ -40,6 +40,7 @@ local STEP_DELAY   = 1.5;
 
 local defaults = T{
     visible   = true,
+    opacity   = 95,      -- window background opacity, percent
     read      = -1,    -- last count read from the item (-1 = never read)
     live      = 0,     -- kills seen since that read
     read_time = 0,
@@ -307,10 +308,14 @@ ashita.events.register('command', 'bladecount_command', function (e)
     elseif (sub == 'show' or sub == 'hide' or sub == '') then
         cfg.visible = (sub == 'show') or (sub == '' and not cfg.visible);
         settings.save();
+    elseif (sub == 'opacity' and tonumber(args[3]) ~= nil) then
+        cfg.opacity = math.max(0, math.min(100, math.floor(tonumber(args[3]))));
+        settings.save();
+        msg(('Background opacity: %d%%'):fmt(cfg.opacity));
     elseif (sub == 'status' or sub == 's') then
         report();
     else
-        msg('/bladecount [show|hide] | refresh | fetch | status | reset   (alias /bod)');
+        msg('/bladecount [show|hide] | refresh | fetch | status | reset | opacity <0-100>   (alias /bod)');
     end
 end);
 
@@ -383,6 +388,121 @@ ashita.events.register('packet_in', 'bladecount_zone', function (e)
 end);
 
 -- Window -----------------------------------------------------------------------------------------
+-- Theme matches the addon manager (and XIUI's config window): dark warm background, gold accent.
+
+local gold       = { 0.957, 0.855, 0.592, 1.0 };
+local goldDark   = { 0.765, 0.684, 0.474, 1.0 };
+local goldDarker = { 0.573, 0.512, 0.355, 1.0 };
+local bgDark     = { 0.051, 0.051, 0.051, 0.95 };
+local bgMedium   = { 0.098, 0.090, 0.075, 1.0 };
+local bgLight    = { 0.137, 0.125, 0.106, 1.0 };
+local bgLighter  = { 0.176, 0.161, 0.137, 1.0 };
+local textLight  = { 0.878, 0.855, 0.812, 1.0 };
+local textMuted  = { 0.6, 0.58, 0.54, 1.0 };
+local borderDark = { 0.3, 0.275, 0.235, 1.0 };
+local green      = { 0.55, 0.80, 0.50, 1.0 };
+local red        = { 0.90, 0.45, 0.40, 1.0 };
+
+local THEME_COLORS = {
+    { ImGuiCol_WindowBg, bgDark }, { ImGuiCol_TitleBg, bgMedium }, { ImGuiCol_TitleBgActive, bgLight },
+    { ImGuiCol_TitleBgCollapsed, bgDark }, { ImGuiCol_FrameBg, bgMedium }, { ImGuiCol_FrameBgHovered, bgLight },
+    { ImGuiCol_FrameBgActive, bgLighter }, { ImGuiCol_Border, borderDark }, { ImGuiCol_Text, textLight },
+    { ImGuiCol_TextDisabled, goldDark }, { ImGuiCol_Button, bgMedium }, { ImGuiCol_ButtonHovered, bgLight },
+    { ImGuiCol_ButtonActive, bgLighter }, { ImGuiCol_Separator, borderDark },
+    { ImGuiCol_Header, bgLight }, { ImGuiCol_HeaderHovered, bgLighter },
+    { ImGuiCol_HeaderActive, { gold[1], gold[2], gold[3], 0.3 } },
+    { ImGuiCol_SliderGrab, goldDark }, { ImGuiCol_SliderGrabActive, gold },
+    { ImGuiCol_PlotHistogram, { gold[1], gold[2], gold[3], 0.55 } },
+    { ImGuiCol_ResizeGrip, goldDarker }, { ImGuiCol_ResizeGripHovered, goldDark }, { ImGuiCol_ResizeGripActive, gold },
+};
+local THEME_VARS = {
+    { ImGuiStyleVar_WindowPadding, { 12, 12 } }, { ImGuiStyleVar_FramePadding, { 6, 4 } },
+    { ImGuiStyleVar_ItemSpacing, { 8, 6 } }, { ImGuiStyleVar_FrameRounding, 4.0 }, { ImGuiStyleVar_WindowRounding, 6.0 },
+};
+
+local LABEL_WIDTH = 70;
+local draw_error  = false;
+
+local function labelValue(label, value, color)
+    imgui.TextColored(textMuted, label);
+    imgui.SameLine(LABEL_WIDTH);
+    if (color ~= nil) then imgui.TextColored(color, value); else imgui.Text(value); end
+end
+
+local function wrapped(color, text)
+    imgui.PushTextWrapPos(0);
+    imgui.TextColored(color, text);
+    imgui.PopTextWrapPos();
+end
+
+local function accentButton(label, enabled)
+    imgui.PushStyleColor(ImGuiCol_Button, { gold[1], gold[2], gold[3], 0.22 });
+    imgui.PushStyleColor(ImGuiCol_ButtonHovered, { gold[1], gold[2], gold[3], 0.35 });
+    imgui.PushStyleColor(ImGuiCol_ButtonActive, { gold[1], gold[2], gold[3], 0.45 });
+    imgui.BeginDisabled(not enabled);
+    local pressed = imgui.Button(label, { -1, 0 });
+    imgui.EndDisabled();
+    imgui.PopStyleColor(3);
+    return pressed;
+end
+
+local function draw_body()
+    if (cfg.read < 0) then
+        imgui.TextColored(gold, 'Chaosbringer');
+        labelValue('Stored', 'unknown', textMuted);
+        labelValue('Live', ('+%d'):fmt(cfg.live));
+        wrapped(textMuted, 'Refresh to read the count from the sword.');
+    else
+        local est = cfg.read + cfg.live;
+        local st  = stage_for(est);
+        local done = est >= st.goal;
+
+        if (st ~= STAGES[1]) then
+            imgui.TextColored(textMuted, STAGES[1].name);
+            imgui.SameLine();
+            imgui.TextColored(green, 'Done');
+        end
+        imgui.TextColored(gold, st.name);
+        imgui.SameLine();
+        if (done) then imgui.TextColored(green, 'Done'); else imgui.TextColored(textMuted, 'In progress'); end
+
+        imgui.Spacing();
+        labelValue('Stored', tostring(cfg.read));
+        labelValue('Live', ('+%d'):fmt(cfg.live), cfg.live > 0 and gold or nil);
+        local frac = math.max(0, math.min(1, (est - st.from) / (st.goal - st.from)));
+        if (done) then imgui.PushStyleColor(ImGuiCol_PlotHistogram, { green[1], green[2], green[3], 0.6 }); end
+        imgui.ProgressBar(frac, { -1, 0 }, ('%d / %d'):fmt(est, st.goal));
+        if (done) then imgui.PopStyleColor(); end
+
+        if (done) then wrapped(green, st.done); end
+        local hint;
+        if (st == STAGES[2] and cfg.darkness == 'unknown') then
+            hint = 'Zone into Beadeaux first if you have not finished Blade of Darkness yet.';
+        elseif (st == STAGES[2] and cfg.death == 'not_started') then
+            hint = 'Get Blade of Death from Gumbah in Bastok Mines (J-7); needs Bastok fame 3.';
+        elseif (st == STAGES[1] and cfg.darkness == 'not_started') then
+            hint = 'Blade of Darkness is not active in your quest log.';
+        end
+        if (hint ~= nil) then wrapped(textMuted, hint); end
+    end
+
+    if (not main_is_chaosbringer()) then
+        wrapped(red, 'Chaosbringer is not in your main hand.');
+    end
+    imgui.Spacing();
+    if (accentButton(busy and 'Refreshing...' or 'Refresh stored count', not busy)) then refresh(); end
+
+    imgui.Spacing();
+    if (imgui.CollapsingHeader('Settings')) then
+        imgui.TextColored(textMuted, 'Background');
+        imgui.SetNextItemWidth(-1);
+        local v = { cfg.opacity };
+        if (imgui.SliderInt('##bladecount_opacity', v, 0, 100, '%d%%', ImGuiSliderFlags_AlwaysClamp)) then
+            cfg.opacity = v[1];
+        end
+        if (imgui.IsItemDeactivatedAfterEdit()) then settings.save(); end
+    end
+end
 
 ashita.events.register('d3d_present', 'bladecount_present', function ()
     if (not cfg.visible) then return; end
@@ -392,50 +512,25 @@ ashita.events.register('d3d_present', 'bladecount_present', function ()
     end
     if (not has_sword) then return; end
 
-    imgui.SetNextWindowSize({ 220, 0 }, ImGuiCond_Always);
+    for _, c in ipairs(THEME_COLORS) do imgui.PushStyleColor(c[1], c[2]); end
+    for _, v in ipairs(THEME_VARS) do imgui.PushStyleVar(v[1], v[2]); end
+    local alpha = math.max(0, math.min(100, tonumber(cfg.opacity) or 95)) / 100;
+    imgui.PushStyleColor(ImGuiCol_WindowBg, { bgDark[1], bgDark[2], bgDark[3], alpha });
+    imgui.PushStyleColor(ImGuiCol_Border, { borderDark[1], borderDark[2], borderDark[3], alpha });
+
+    imgui.SetNextWindowSize({ 240, 0 }, ImGuiCond_Always);
     local open = { true };
-    if (imgui.Begin('Chaosbringer###bladecount', open, bit.bor(ImGuiWindowFlags_NoResize, ImGuiWindowFlags_AlwaysAutoResize, ImGuiWindowFlags_NoCollapse))) then
-        if (cfg.read < 0) then
-            imgui.Text(('Stored: unknown'));
-            imgui.Text(('Live kills: %d'):fmt(cfg.live));
-        else
-            local est = cfg.read + cfg.live;
-            local st  = stage_for(est);
-            if (st ~= STAGES[1]) then
-                imgui.TextColored({ 0.6, 0.6, 0.6, 1.0 }, STAGES[1].name .. ': done');
-            end
-            imgui.Text(st.name);
-            imgui.Text(('Stored: %d   Live: +%d'):fmt(cfg.read, cfg.live));
-            local frac = math.max(0, math.min(1, (est - st.from) / (st.goal - st.from)));
-            imgui.ProgressBar(frac, { -1, 0 }, ('%d / %d'):fmt(est, st.goal));
-            if (est >= st.goal) then
-                imgui.TextColored({ 0.4, 1.0, 0.4, 1.0 }, 'Done!');
-                imgui.PushTextWrapPos(0);
-                imgui.TextColored({ 0.4, 1.0, 0.4, 1.0 }, st.done);
-                imgui.PopTextWrapPos();
-            end
-            local hint;
-            if (st == STAGES[2] and cfg.darkness == 'unknown') then
-                hint = 'Zone into Beadeaux first if you have not finished Blade of Darkness yet.';
-            elseif (st == STAGES[2] and cfg.death == 'not_started') then
-                hint = 'Get Blade of Death from Gumbah in Bastok Mines (J-7); needs Bastok fame 3.';
-            elseif (st == STAGES[1] and cfg.darkness == 'not_started') then
-                hint = 'Blade of Darkness is not active in your quest log.';
-            end
-            if (hint ~= nil) then
-                imgui.PushTextWrapPos(0);
-                imgui.TextColored({ 0.6, 0.6, 0.6, 1.0 }, hint);
-                imgui.PopTextWrapPos();
-            end
-        end
-        if (not main_is_chaosbringer()) then
-            imgui.TextColored({ 1.0, 0.6, 0.3, 1.0 }, 'Chaosbringer not equipped');
-        end
-        imgui.BeginDisabled(busy);
-        if (imgui.Button(busy and 'Refreshing...' or 'Refresh stored count')) then refresh(); end
-        imgui.EndDisabled();
+    if (imgui.Begin('Chaosbringer - v' .. addon.version .. '###bladecount', open,
+            bit.bor(ImGuiWindowFlags_NoResize, ImGuiWindowFlags_AlwaysAutoResize, ImGuiWindowFlags_NoCollapse))) then
+        -- Keep the style stack balanced even if drawing fails.
+        local ok, e = pcall(draw_body);
+        if (not ok and not draw_error) then draw_error = true; err('Window error: ' .. tostring(e)); end
     end
     imgui.End();
+
+    imgui.PopStyleVar(#THEME_VARS);
+    imgui.PopStyleColor(#THEME_COLORS + 2);
+
     if (not open[1]) then
         cfg.visible = false;
         settings.save();
