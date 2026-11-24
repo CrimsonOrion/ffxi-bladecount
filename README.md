@@ -1,6 +1,8 @@
 # bladecount
 
-An [Ashita v4](https://www.ashitaxi.com/) addon for Final Fantasy XI that tracks your Chaosbringer kills for the Dark Knight unlock quest **Blade of Darkness** (100 kills needed).
+An [Ashita v4](https://www.ashitaxi.com/) addon for Final Fantasy XI that tracks your Chaosbringer kills for the Dark Knight quests **Blade of Darkness** and **Blade of Death**.
+
+The sword's kill count carries on between the two quests: Blade of Darkness needs 100 kills, and Blade of Death needs 100 more, so the count reaches 200. The window shows Blade of Darkness up to 100, then switches to Blade of Death up to 200, and says what to do when each is done. If you drop the sword and get a new one, its count starts again from zero.
 
 ## How it works
 

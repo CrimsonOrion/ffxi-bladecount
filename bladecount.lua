@@ -1,5 +1,6 @@
 --[[
-* bladecount - Tracks Chaosbringer kills for the Dark Knight quest Blade of Darkness.
+* bladecount - Tracks Chaosbringer kills for the Dark Knight quests Blade of Darkness
+* (100 kills) and Blade of Death (the count carries on to 200).
 *
 * The game stores the kill count on the Chaosbringer itself, in the first 4 bytes of the
 * item's extra data (the same value Windower's LatentChecker reads as "ws_points").
@@ -13,8 +14,8 @@
 
 addon.name    = 'bladecount';
 addon.author  = 'CrimsonOrion';
-addon.version = '1.3';
-addon.desc    = 'Tracks Chaosbringer kills for Blade of Darkness.';
+addon.version = '1.4';
+addon.desc    = 'Tracks Chaosbringer kills for Blade of Darkness and Blade of Death.';
 addon.link    = 'https://github.com/CrimsonOrion/ffxi-bladecount';
 
 require('common');
@@ -23,7 +24,15 @@ local imgui    = require('imgui');
 local settings = require('settings');
 
 local CHAOSBRINGER = 16607;
-local GOAL         = 100;
+-- The sword's count keeps going after Blade of Darkness, so Blade of Death ends at 200.
+local STAGES = {
+    { name = 'Blade of Darkness', from = 0,   goal = 100, done = 'Zone into Beadeaux for the cutscene.' },
+    { name = 'Blade of Death',    from = 100, goal = 200, done = 'Trade Chaosbringer to the ??? in Gusgen Mines (J-7, map 1).' },
+};
+
+local function stage_for(n)
+    return (n < STAGES[1].goal) and STAGES[1] or STAGES[2];
+end
 local MSG_DEFEATS  = 6;     -- "<actor> defeats <target>."
 local STORAGE_BAGS = { 5, 6, 7 }; -- Satchel, Sack, Case
 local STEP_DELAY   = 1.5;
@@ -98,9 +107,10 @@ local function report()
         return;
     end
     local est = cfg.read + cfg.live;
-    msg(('Stored count: %d / %d'):fmt(cfg.read, GOAL)
+    local st = stage_for(est);
+    msg(('%s: stored count %d / %d'):fmt(st.name, cfg.read, st.goal)
         .. (cfg.live > 0 and (' (+%d live = ~%d)'):fmt(cfg.live, est) or '')
-        .. (est >= GOAL and ' - done, go see Zeid!' or ''));
+        .. (est >= st.goal and (' - done! ' .. st.done) or ''));
 end
 
 -- Packets ----------------------------------------------------------------------------------------
@@ -286,16 +296,29 @@ ashita.events.register('d3d_present', 'bladecount_present', function ()
 
     imgui.SetNextWindowSize({ 220, 0 }, ImGuiCond_Always);
     local open = { true };
-    if (imgui.Begin('Blade of Darkness', open, bit.bor(ImGuiWindowFlags_NoResize, ImGuiWindowFlags_AlwaysAutoResize, ImGuiWindowFlags_NoCollapse))) then
+    if (imgui.Begin('Chaosbringer###bladecount', open, bit.bor(ImGuiWindowFlags_NoResize, ImGuiWindowFlags_AlwaysAutoResize, ImGuiWindowFlags_NoCollapse))) then
         if (cfg.read < 0) then
             imgui.Text(('Stored: unknown'));
             imgui.Text(('Live kills: %d'):fmt(cfg.live));
         else
-            local est = math.min(cfg.read + cfg.live, GOAL);
+            local est = cfg.read + cfg.live;
+            local st  = stage_for(est);
+            if (st ~= STAGES[1]) then
+                imgui.TextColored({ 0.6, 0.6, 0.6, 1.0 }, ('%s: done (%d)'):fmt(STAGES[1].name, STAGES[1].goal));
+            end
+            imgui.Text(st.name);
             imgui.Text(('Stored: %d   Live: +%d'):fmt(cfg.read, cfg.live));
-            imgui.ProgressBar(est / GOAL, { -1, 0 }, ('%d / %d'):fmt(cfg.read + cfg.live, GOAL));
-            if (cfg.read + cfg.live >= GOAL) then
-                imgui.TextColored({ 0.4, 1.0, 0.4, 1.0 }, 'Done! Talk to Zeid.');
+            local frac = math.max(0, math.min(1, (est - st.from) / (st.goal - st.from)));
+            imgui.ProgressBar(frac, { -1, 0 }, ('%d / %d'):fmt(est, st.goal));
+            if (est >= st.goal) then
+                imgui.TextColored({ 0.4, 1.0, 0.4, 1.0 }, 'Done!');
+                imgui.PushTextWrapPos(0);
+                imgui.TextColored({ 0.4, 1.0, 0.4, 1.0 }, st.done);
+                imgui.PopTextWrapPos();
+            elseif (st ~= STAGES[1]) then
+                imgui.PushTextWrapPos(0);
+                imgui.TextColored({ 0.6, 0.6, 0.6, 1.0 }, 'Zone into Beadeaux first if you have not finished Blade of Darkness yet.');
+                imgui.PopTextWrapPos();
             end
         end
         if (not main_is_chaosbringer()) then
