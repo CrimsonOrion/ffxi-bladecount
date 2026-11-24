@@ -26,6 +26,7 @@ Copy the `bladecount` folder into `Ashita/addons`, then:
 |---|---|
 | `/bod` | Show or hide the window |
 | `/bod refresh` | Read the current count from the server (resets your TP; the sword is re-equipped afterwards) |
+| `/bod fetch` | Bring the sword back from your Satchel, Sack or Case and equip it (use this if a refresh stops partway) |
 | `/bod status` | Print the counts in chat |
 | `/bod reset` | Zero the live counter |
 

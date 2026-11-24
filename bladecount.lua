@@ -14,7 +14,7 @@
 
 addon.name    = 'bladecount';
 addon.author  = 'CrimsonOrion';
-addon.version = '1.4';
+addon.version = '1.6';
 addon.desc    = 'Tracks Chaosbringer kills for Blade of Darkness and Blade of Death.';
 addon.link    = 'https://github.com/CrimsonOrion/ffxi-bladecount';
 
@@ -137,18 +137,86 @@ end
 
 -- Refresh: unequip, (wardrobe ->) inventory -> storage -> inventory, read, re-equip ------------------
 
-local function run_steps(steps, n)
-    n = n or 1;
+local BAG_NAMES = { [0] = 'Inventory', [5] = 'Satchel', [6] = 'Sack', [7] = 'Case' };
+
+-- Where the sword is now, as a bag name (for error messages).
+local function where_is_sword()
+    for _, c in ipairs({ 0, 5, 6, 7 }) do
+        for i = 1, inv():GetContainerCountMax(c) do
+            local item = inv():GetContainerItem(c, i);
+            if (item ~= nil and item.Id == CHAOSBRINGER) then return BAG_NAMES[c]; end
+        end
+    end
+    return find_sword() ~= nil and 'a wardrobe' or nil;
+end
+
+-- A step may return 'retry' while it waits for the game to catch up (the client's copy
+-- of a bag can lag behind the move); it is retried every second up to MAX_RETRIES times.
+local MAX_RETRIES = 8;
+
+local function run_steps(steps, n, tries)
+    n, tries = n or 1, tries or 0;
     if (n > #steps) then busy = false; return; end
-    local ok, stop = pcall(steps[n]);
+    local ok, result = pcall(steps[n]);
+    if (ok and result == 'retry') then
+        if (tries < MAX_RETRIES) then
+            ashita.tasks.once(1, function () run_steps(steps, n, tries + 1); end);
+            return;
+        end
+        ok, result = false, 'timed out waiting for the sword to move';
+    end
     if (not ok) then
-        err('Refresh failed: ' .. tostring(stop));
+        err('Refresh failed: ' .. tostring(result));
+        local where = where_is_sword();
+        if (where ~= nil) then err('Your Chaosbringer is in your ' .. where .. '.'); end
         watch_slot = nil;
         busy = false;
         return;
     end
-    if (stop) then busy = false; return; end
+    if (result == 'stop') then busy = false; return; end
     ashita.tasks.once(STEP_DELAY, function () run_steps(steps, n + 1); end);
+end
+
+-- Step: move the sword from whichever storage bag holds it back to the inventory.
+local function step_bring_back()
+    for _, b in ipairs(STORAGE_BAGS) do
+        for j = 1, inv():GetContainerCountMax(b) do
+            local item = inv():GetContainerItem(b, j);
+            if (item ~= nil and item.Id == CHAOSBRINGER) then
+                send_move(b, j, 0);
+                return;
+            end
+        end
+    end
+    return 'retry';
+end
+
+-- Fetch: bring the sword back from a storage bag (if it is in one) and equip it.
+local function fetch()
+    if (busy) then err('A refresh is already running.'); return; end
+    local in_storage = false;
+    for _, b in ipairs(STORAGE_BAGS) do
+        for j = 1, inv():GetContainerCountMax(b) do
+            local item = inv():GetContainerItem(b, j);
+            if (item ~= nil and item.Id == CHAOSBRINGER) then in_storage = true; end
+        end
+    end
+    if (not in_storage and find_sword() == nil) then
+        err('No Chaosbringer in your inventory, wardrobes, Satchel, Sack or Case.');
+        return;
+    end
+    if (in_storage and not bag_has_room(0)) then err('Need a free inventory slot.'); return; end
+
+    busy = true;
+    local steps = {};
+    if (in_storage) then steps[#steps + 1] = step_bring_back; end
+    steps[#steps + 1] = function ()
+        local c, i = find_sword();
+        if (c == nil) then return 'retry'; end
+        send_equip(i, 0, c);
+        msg('Chaosbringer equipped.');
+    end;
+    run_steps(steps);
 end
 
 local function refresh()
@@ -179,7 +247,7 @@ local function refresh()
         end,
         function ()
             c, i = find_sword();
-            if (c ~= 0) then error('could not move the sword to the inventory'); end
+            if (c ~= 0) then return 'retry'; end
             watch_slot, captured = i, nil;
             send_move(0, i, storage);
         end,
@@ -193,22 +261,15 @@ local function refresh()
                     n = struct.unpack('I', slot.Extra, 1);
                 end
             end
+            if (n == nil) then return 'retry'; end
             watch_slot = nil;
-            if (n == nil) then error('the server did not send the count'); end
             set_read(n);
             report();
-            for j = 1, inv():GetContainerCountMax(storage) do
-                local item = inv():GetContainerItem(storage, j);
-                if (item ~= nil and item.Id == CHAOSBRINGER) then
-                    send_move(storage, j, 0);
-                    return;
-                end
-            end
-            error('could not find the sword in the storage bag');
         end,
+        step_bring_back,
         function ()
             c, i = find_sword();
-            if (c ~= 0) then error('the sword did not come back to the inventory'); end
+            if (c ~= 0) then return 'retry'; end
             if (was_equipped) then send_equip(i, 0, 0); end
         end,
     });
@@ -224,6 +285,8 @@ ashita.events.register('command', 'bladecount_command', function (e)
     local sub = (args[2] or ''):lower();
     if (sub == 'refresh' or sub == 'r') then
         refresh();
+    elseif (sub == 'fetch' or sub == 'f') then
+        fetch();
     elseif (sub == 'reset') then
         cfg.live = 0;
         settings.save();
@@ -234,7 +297,7 @@ ashita.events.register('command', 'bladecount_command', function (e)
     elseif (sub == 'status' or sub == 's') then
         report();
     else
-        msg('/bladecount [show|hide] | refresh | status | reset   (alias /bod)');
+        msg('/bladecount [show|hide] | refresh | fetch | status | reset   (alias /bod)');
     end
 end);
 
