@@ -14,7 +14,7 @@
 
 addon.name    = 'bladecount';
 addon.author  = 'CrimsonOrion';
-addon.version = '1.6';
+addon.version = '1.7';
 addon.desc    = 'Tracks Chaosbringer kills for Blade of Darkness and Blade of Death.';
 addon.link    = 'https://github.com/CrimsonOrion/ffxi-bladecount';
 
@@ -30,9 +30,10 @@ local STAGES = {
     { name = 'Blade of Death',    from = 100, goal = 200, done = 'Trade Chaosbringer to the ??? in Gusgen Mines (J-7, map 1).' },
 };
 
-local function stage_for(n)
-    return (n < STAGES[1].goal) and STAGES[1] or STAGES[2];
-end
+-- Quest log bits (Bastok log), as read by the journal addon from packet 0x056.
+local QUEST_DARKNESS = 28;
+local QUEST_DEATH    = 47;
+local LOG_BASTOK_CURRENT, LOG_BASTOK_COMPLETED = 0x0058, 0x0098;
 local MSG_DEFEATS  = 6;     -- "<actor> defeats <target>."
 local STORAGE_BAGS = { 5, 6, 7 }; -- Satchel, Sack, Case
 local STEP_DELAY   = 1.5;
@@ -42,9 +43,20 @@ local defaults = T{
     read      = -1,    -- last count read from the item (-1 = never read)
     live      = 0,     -- kills seen since that read
     read_time = 0,
+    darkness  = 'unknown',   -- quest status from the game's quest log:
+    death     = 'unknown',   -- 'unknown', 'not_started', 'active' or 'completed'
 };
 
 local cfg  = settings.load(defaults);
+
+-- Which quest the count is for. Uses the quest log when known, else the count itself.
+local function stage_for(n)
+    if (cfg.darkness == 'completed') then return STAGES[2]; end
+    if (cfg.darkness ~= 'unknown') then return STAGES[1]; end
+    return (n < STAGES[1].goal) and STAGES[1] or STAGES[2];
+end
+
+local STATUS_TEXT = { unknown = 'unknown', not_started = 'not started', active = 'active', completed = 'completed' };
 local busy = false;
 local has_sword, next_scan = false, 0;
 local watch_slot, captured = nil, nil;  -- inventory slot the sword just left, and the count the server sent for it
@@ -111,6 +123,7 @@ local function report()
     msg(('%s: stored count %d / %d'):fmt(st.name, cfg.read, st.goal)
         .. (cfg.live > 0 and (' (+%d live = ~%d)'):fmt(cfg.live, est) or '')
         .. (est >= st.goal and (' - done! ' .. st.done) or ''));
+    msg(('Quest log: Blade of Darkness %s, Blade of Death %s'):fmt(STATUS_TEXT[cfg.darkness] or '?', STATUS_TEXT[cfg.death] or '?'));
 end
 
 -- Packets ----------------------------------------------------------------------------------------
@@ -308,6 +321,28 @@ end);
 local last_action = {};   -- target server id -> action category (1 = melee)
 
 ashita.events.register('packet_in', 'bladecount_packet_in', function (e)
+    if (e.id == 0x56 and e.size >= 40) then
+        local log = struct.unpack('I', e.data, 0x24 + 1);
+        if (log ~= LOG_BASTOK_CURRENT and log ~= LOG_BASTOK_COMPLETED) then return; end
+        local function bit_set(id)
+            local byte = e.data:byte(0x04 + math.floor(id / 8) + 1) or 0;
+            return bit.band(byte, bit.lshift(1, id % 8)) ~= 0;
+        end
+        local changed = false;
+        for key, id in pairs({ darkness = QUEST_DARKNESS, death = QUEST_DEATH }) do
+            local new = cfg[key];
+            if (log == LOG_BASTOK_COMPLETED) then
+                if (bit_set(id)) then new = 'completed';
+                elseif (new == 'completed' or new == 'unknown') then new = 'not_started'; end
+            elseif (new ~= 'completed') then
+                new = bit_set(id) and 'active' or 'not_started';
+            end
+            if (new ~= cfg[key]) then cfg[key] = new; changed = true; end
+        end
+        if (changed) then settings.save(); end
+        return;
+    end
+
     local me = AshitaCore:GetMemoryManager():GetParty():GetMemberServerId(0);
 
     if (e.id == 0x28) then
@@ -378,9 +413,18 @@ ashita.events.register('d3d_present', 'bladecount_present', function ()
                 imgui.PushTextWrapPos(0);
                 imgui.TextColored({ 0.4, 1.0, 0.4, 1.0 }, st.done);
                 imgui.PopTextWrapPos();
-            elseif (st ~= STAGES[1]) then
+            end
+            local hint;
+            if (st == STAGES[2] and cfg.darkness == 'unknown') then
+                hint = 'Zone into Beadeaux first if you have not finished Blade of Darkness yet.';
+            elseif (st == STAGES[2] and cfg.death == 'not_started') then
+                hint = 'Get Blade of Death from Gumbah in Bastok Mines (J-7); needs Bastok fame 3.';
+            elseif (st == STAGES[1] and cfg.darkness == 'not_started') then
+                hint = 'Blade of Darkness is not active in your quest log.';
+            end
+            if (hint ~= nil) then
                 imgui.PushTextWrapPos(0);
-                imgui.TextColored({ 0.6, 0.6, 0.6, 1.0 }, 'Zone into Beadeaux first if you have not finished Blade of Darkness yet.');
+                imgui.TextColored({ 0.6, 0.6, 0.6, 1.0 }, hint);
                 imgui.PopTextWrapPos();
             end
         end
