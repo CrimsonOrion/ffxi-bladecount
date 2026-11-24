@@ -14,7 +14,7 @@
 
 addon.name    = 'bladecount';
 addon.author  = 'CrimsonOrion';
-addon.version = '1.7';
+addon.version = '1.8';
 addon.desc    = 'Tracks Chaosbringer kills for Blade of Darkness and Blade of Death.';
 addon.link    = 'https://github.com/CrimsonOrion/ffxi-bladecount';
 
@@ -402,7 +402,7 @@ ashita.events.register('d3d_present', 'bladecount_present', function ()
             local est = cfg.read + cfg.live;
             local st  = stage_for(est);
             if (st ~= STAGES[1]) then
-                imgui.TextColored({ 0.6, 0.6, 0.6, 1.0 }, ('%s: done (%d)'):fmt(STAGES[1].name, STAGES[1].goal));
+                imgui.TextColored({ 0.6, 0.6, 0.6, 1.0 }, STAGES[1].name .. ': done');
             end
             imgui.Text(st.name);
             imgui.Text(('Stored: %d   Live: +%d'):fmt(cfg.read, cfg.live));
